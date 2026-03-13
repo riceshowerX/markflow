@@ -255,6 +255,9 @@ function getPrompts(action: string, content: string, selection?: string) {
   let systemPrompt = '';
   let userPrompt = '';
 
+  // 对于需要选中文本的操作，如果没有选中则使用全文
+  const textToProcess = selection || content;
+
   switch (action) {
     case 'continue':
       systemPrompt = defaultSystemPrompts.continue;
@@ -263,12 +266,12 @@ function getPrompts(action: string, content: string, selection?: string) {
 
     case 'polish':
       systemPrompt = defaultSystemPrompts.polish;
-      userPrompt = `请润色以下文本：\n\n${selection}`;
+      userPrompt = `请润色以下文本：\n\n${textToProcess}`;
       break;
 
     case 'expand':
       systemPrompt = defaultSystemPrompts.expand;
-      userPrompt = `请扩展以下内容：\n\n${selection}`;
+      userPrompt = `请扩展以下内容：\n\n${textToProcess}`;
       break;
 
     case 'summarize':
@@ -278,12 +281,12 @@ function getPrompts(action: string, content: string, selection?: string) {
 
     case 'translate':
       systemPrompt = defaultSystemPrompts.translate;
-      userPrompt = `请翻译以下内容：\n\n${selection}`;
+      userPrompt = `请翻译以下内容：\n\n${textToProcess}`;
       break;
 
     case 'fix':
       systemPrompt = defaultSystemPrompts.fix;
-      userPrompt = `请修正以下文本中的错误：\n\n${selection}`;
+      userPrompt = `请修正以下文本中的错误：\n\n${textToProcess}`;
       break;
 
     case 'outline':
@@ -298,12 +301,12 @@ function getPrompts(action: string, content: string, selection?: string) {
 
     case 'explain':
       systemPrompt = defaultSystemPrompts.explain;
-      userPrompt = `请解释以下内容：\n\n${selection}`;
+      userPrompt = `请解释以下内容：\n\n${textToProcess}`;
       break;
 
     case 'rewrite':
       systemPrompt = defaultSystemPrompts.rewrite;
-      userPrompt = `请改写以下内容：\n\n${selection}`;
+      userPrompt = `请改写以下内容：\n\n${textToProcess}`;
       break;
 
     default:

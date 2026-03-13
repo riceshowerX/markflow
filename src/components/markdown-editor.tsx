@@ -157,9 +157,6 @@ export default function MarkdownEditor() {
   const [aiResult, setAiResult] = useState('');
   const [aiAction, setAiAction] = useState<string>('');
   
-  // AI 配置
-  const [aiConfig, setAiConfig] = useState(() => aiConfigManager.getConfig());
-  
   const containerRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -167,9 +164,6 @@ export default function MarkdownEditor() {
   useEffect(() => {
     const docs = documentManager.getAllDocuments();
     setDocuments(docs);
-    
-    // 加载 AI 配置
-    setAiConfig(aiConfigManager.getConfig());
     
     const current = documentManager.getCurrentDocument();
     if (current) {
@@ -434,20 +428,35 @@ export default function MarkdownEditor() {
   const handleReplace = useCallback(() => {
     if (!searchQuery) return;
     
-    const newContent = content.replace(new RegExp(searchQuery, 'g'), replaceQuery);
+    // 转义正则表达式特殊字符
+    const escapedQuery = searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(escapedQuery, 'g');
+    const matches = content.match(regex);
+    const count = matches ? matches.length : 0;
+    
+    if (count === 0) {
+      toast.info('未找到匹配内容');
+      return;
+    }
+    
+    const newContent = content.replace(regex, replaceQuery);
     setContent(newContent);
-    toast.success(`已替换 ${content.split(searchQuery).length - 1} 处`);
+    toast.success(`已替换 ${count} 处`);
   }, [content, searchQuery, replaceQuery]);
 
   // 查找下一个
   const handleFindNext = useCallback(() => {
-    if (!searchQuery || !searchInputRef.current) return;
+    if (!searchQuery) return;
     
     const textarea = document.querySelector('.w-md-editor-text-input') as HTMLTextAreaElement;
-    if (!textarea) return;
+    if (!textarea) {
+      toast.info('请先聚焦编辑器');
+      return;
+    }
     
     const text = textarea.value;
     const start = textarea.selectionEnd;
+    // 使用普通字符串查找，而不是正则
     const index = text.indexOf(searchQuery, start);
     
     if (index !== -1) {
