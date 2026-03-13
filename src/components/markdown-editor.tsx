@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -96,10 +97,19 @@ import {
   Heading,
   HelpCircle,
   RefreshCw,
+  FolderPlus,
+  FolderTree,
+  FolderCog,
+  ArrowRight,
+  GitBranch,
+  RotateCcw as Restore,
+  Keyboard,
+  Send,
+  Plus,
 } from 'lucide-react';
 import { saveAs } from 'file-saver';
 import { toast } from 'sonner';
-import { documentManager, type Document } from '@/lib/document-manager';
+import { documentManager, type Document, type Folder as FolderType, type DocumentVersion } from '@/lib/document-manager';
 import { templates, templateCategories, getTemplatesByCategory, getTemplateById } from '@/lib/templates';
 import { aiConfigManager } from '@/lib/ai-config';
 
@@ -115,6 +125,20 @@ interface HistoryState {
   timestamp: number;
 }
 
+// 快捷键定义
+const SHORTCUTS = [
+  { key: 'Ctrl/Cmd + S', description: '保存文档' },
+  { key: 'Ctrl/Cmd + Z', description: '撤销' },
+  { key: 'Ctrl/Cmd + Shift + Z', description: '重做' },
+  { key: 'Ctrl/Cmd + F', description: '查找替换' },
+  { key: 'Ctrl/Cmd + B', description: '加粗' },
+  { key: 'Ctrl/Cmd + I', description: '斜体' },
+  { key: 'Ctrl/Cmd + K', description: '插入链接' },
+  { key: 'Ctrl/Cmd + Shift + C', description: '插入代码块' },
+  { key: 'Ctrl/Cmd + /', description: '插入注释' },
+  { key: 'Ctrl/Cmd + Shift + S', description: '保存版本' },
+];
+
 export default function MarkdownEditor() {
   const router = useRouter();
   const { theme, setTheme, resolvedTheme } = useTheme();
@@ -125,6 +149,26 @@ export default function MarkdownEditor() {
   const [content, setContent] = useState('');
   const [title, setTitle] = useState('');
   
+  // 文件夹状态
+  const [folders, setFolders] = useState<FolderType[]>([]);
+  const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
+  const [showNewFolderDialog, setShowNewFolderDialog] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+  
+  // 版本历史状态
+  const [showVersionHistory, setShowVersionHistory] = useState(false);
+  const [versions, setVersions] = useState<DocumentVersion[]>([]);
+  
+  // AI 对话状态
+  const [showAIChat, setShowAIChat] = useState(false);
+  const [chatMessages, setChatMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [chatLoading, setChatLoading] = useState(false);
+  
+  // 快捷键面板
+  const [showShortcuts, setShowShortcuts] = useState(false);
+  
   // 编辑器状态
   const [mode, setMode] = useState<'edit' | 'preview' | 'live'>('live');
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -132,6 +176,7 @@ export default function MarkdownEditor() {
   
   // UI 状态
   const [showSidebar, setShowSidebar] = useState(true);
+  const [sidebarTab, setSidebarTab] = useState<'documents' | 'folders'>('documents');
   const [showTemplates, setShowTemplates] = useState(false);
   const [showSearchReplace, setShowSearchReplace] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -159,21 +204,41 @@ export default function MarkdownEditor() {
   
   const containerRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
 
   // 初始化
   useEffect(() => {
     const docs = documentManager.getAllDocuments();
     setDocuments(docs);
     
+    const foldersData = documentManager.getAllFolders();
+    setFolders(foldersData);
+    
     const current = documentManager.getCurrentDocument();
     if (current) {
       setCurrentDoc(current);
       setContent(current.content);
       setTitle(current.title);
+      setCurrentFolderId(current.folderId);
+      setVersions(current.versions || []);
     } else {
       handleCreateDocument();
     }
   }, []);
+
+  // 自动保存版本（每 5 分钟）
+  useEffect(() => {
+    if (!currentDoc) return;
+    
+    const interval = setInterval(() => {
+      const savedVersion = documentManager.autoSaveVersion(currentDoc.id);
+      if (savedVersion) {
+        setVersions(documentManager.getVersionHistory(currentDoc.id));
+      }
+    }, 5 * 60 * 1000);
+    
+    return () => clearInterval(interval);
+  }, [currentDoc]);
 
   // 保存当前文档
   useEffect(() => {
@@ -231,21 +296,24 @@ export default function MarkdownEditor() {
   }, [content]);
 
   // 创建新文档
-  const handleCreateDocument = useCallback((templateId?: string) => {
+  const handleCreateDocument = useCallback((templateId?: string, _folderId?: string | null, specificFolderId?: string | null) => {
     const template = templateId ? getTemplateById(templateId) : null;
+    const folderId = specificFolderId !== undefined ? specificFolderId : currentFolderId;
     const doc = documentManager.createDocument(
-      template?.name || '无标题文档',
-      template?.content || ''
+      template?.name || 'Untitled',
+      template?.content || '',
+      folderId
     );
     setCurrentDoc(doc);
     setContent(doc.content);
     setTitle(doc.title);
+    setCurrentFolderId(folderId);
     setDocuments(documentManager.getAllDocuments());
     setUndoStack([]);
     setRedoStack([]);
     setShowTemplates(false);
     toast.success('已创建新文档');
-  }, []);
+  }, [currentFolderId]);
 
   // 切换文档
   const handleSwitchDocument = useCallback((docId: string) => {
@@ -254,6 +322,8 @@ export default function MarkdownEditor() {
       setCurrentDoc(doc);
       setContent(doc.content);
       setTitle(doc.title);
+      setCurrentFolderId(doc.folderId);
+      setVersions(doc.versions || []);
       setUndoStack([]);
       setRedoStack([]);
       setDocuments(documentManager.getAllDocuments());
@@ -299,6 +369,199 @@ export default function MarkdownEditor() {
       setCurrentDoc(documentManager.getDocument(docId) || null);
     }
   }, [currentDoc]);
+
+  // ==================== 文件夹操作 ====================
+
+  // 创建文件夹
+  const handleCreateFolder = useCallback(() => {
+    if (!newFolderName.trim()) {
+      toast.error('请输入文件夹名称');
+      return;
+    }
+    
+    const folder = documentManager.createFolder(newFolderName.trim(), currentFolderId);
+    setFolders(documentManager.getAllFolders());
+    setNewFolderName('');
+    setShowNewFolderDialog(false);
+    toast.success('文件夹创建成功');
+  }, [newFolderName, currentFolderId]);
+
+  // 删除文件夹
+  const handleDeleteFolder = useCallback((folderId: string) => {
+    documentManager.deleteFolder(folderId, 'root');
+    setFolders(documentManager.getAllFolders());
+    setDocuments(documentManager.getAllDocuments());
+    if (currentFolderId === folderId) {
+      setCurrentFolderId(null);
+    }
+    toast.success('文件夹已删除');
+  }, [currentFolderId]);
+
+  // 重命名文件夹
+  const handleRenameFolder = useCallback((folderId: string, newName: string) => {
+    documentManager.updateFolder(folderId, { name: newName });
+    setFolders(documentManager.getAllFolders());
+    toast.success('文件夹已重命名');
+  }, []);
+
+  // 切换文件夹展开状态
+  const toggleFolderExpand = useCallback((folderId: string) => {
+    setExpandedFolders(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(folderId)) {
+        newSet.delete(folderId);
+      } else {
+        newSet.add(folderId);
+      }
+      return newSet;
+    });
+  }, []);
+
+  // 移动文档到文件夹
+  const handleMoveDocument = useCallback((docId: string, folderId: string | null) => {
+    documentManager.moveDocumentToFolder(docId, folderId);
+    setDocuments(documentManager.getAllDocuments());
+    if (currentDoc?.id === docId) {
+      setCurrentDoc(documentManager.getDocument(docId) || null);
+      setCurrentFolderId(folderId);
+    }
+    toast.success('文档已移动');
+  }, [currentDoc]);
+
+  // 获取文件夹中的文档
+  const getDocumentsInFolder = useCallback((folderId: string | null) => {
+    return documents.filter(doc => doc.folderId === folderId);
+  }, [documents]);
+
+  // ==================== 版本历史操作 ====================
+
+  // 保存当前版本
+  const handleSaveVersion = useCallback(() => {
+    if (!currentDoc) return;
+    
+    const version = documentManager.saveVersion(currentDoc.id, 'Manual save');
+    if (version) {
+      setVersions(documentManager.getVersionHistory(currentDoc.id));
+      toast.success('版本已保存');
+    }
+  }, [currentDoc]);
+
+  // 恢复到指定版本
+  const handleRestoreVersion = useCallback((versionId: string) => {
+    if (!currentDoc) return;
+    
+    const restored = documentManager.restoreVersion(currentDoc.id, versionId);
+    if (restored) {
+      setContent(restored.content);
+      setTitle(restored.title);
+      setVersions(documentManager.getVersionHistory(currentDoc.id));
+      setShowVersionHistory(false);
+      toast.success('已恢复到指定版本');
+    }
+  }, [currentDoc]);
+
+  // 删除版本
+  const handleDeleteVersion = useCallback((versionId: string) => {
+    if (!currentDoc) return;
+    
+    documentManager.deleteVersion(currentDoc.id, versionId);
+    setVersions(documentManager.getVersionHistory(currentDoc.id));
+    toast.success('版本已删除');
+  }, [currentDoc]);
+
+  // ==================== AI 对话模式 ====================
+
+  // 发送对话消息
+  const handleSendChatMessage = useCallback(async () => {
+    if (!chatInput.trim() || chatLoading) return;
+    
+    const userMessage = chatInput.trim();
+    setChatInput('');
+    setChatMessages(prev => [...prev, { role: 'user', content: userMessage }]);
+    setChatLoading(true);
+
+    const config = aiConfigManager.getConfig();
+
+    try {
+      const response = await fetch('/api/ai-assist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'chat',
+          content,
+          selection: '',
+          chatHistory: chatMessages,
+          userMessage,
+          config: config.apiKey ? {
+            provider: config.provider,
+            apiKey: config.apiKey,
+            apiEndpoint: config.apiEndpoint,
+            model: config.model,
+          } : undefined,
+        }),
+      });
+
+      if (!response.ok) throw new Error('AI 服务请求失败');
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let assistantMessage = '';
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value);
+          const lines = chunk.split('\n');
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6);
+              if (data === '[DONE]') continue;
+              
+              try {
+                const parsed = JSON.parse(data);
+                if (parsed.content) {
+                  assistantMessage += parsed.content;
+                  // 实时更新最后一条消息
+                  setChatMessages(prev => {
+                    const newMessages = [...prev];
+                    if (newMessages[newMessages.length - 1]?.role === 'assistant') {
+                      newMessages[newMessages.length - 1].content = assistantMessage;
+                    } else {
+                      newMessages.push({ role: 'assistant', content: assistantMessage });
+                    }
+                    return newMessages;
+                  });
+                }
+              } catch {
+                // 忽略解析错误
+              }
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Chat error:', error);
+      setChatMessages(prev => [...prev, { role: 'assistant', content: '抱歉，AI 服务暂时不可用。' }]);
+    } finally {
+      setChatLoading(false);
+    }
+  }, [chatInput, chatLoading, content, chatMessages]);
+
+  // 应用对话结果
+  const applyChatResult = useCallback((messageContent: string) => {
+    setContent(content + '\n\n' + messageContent);
+    toast.success('已应用 AI 回复');
+  }, [content]);
+
+  // 滚动到聊天底部
+  useEffect(() => {
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+    }
+  }, [chatMessages]);
 
   // AI 写作助手
   const handleAIAssist = useCallback(async (action: string, selection?: string) => {
@@ -586,14 +849,27 @@ ${content}
           setShowSearchReplace(prev => !prev);
         } else if (e.key === 's') {
           e.preventDefault();
-          toast.success('文档已自动保存');
+          if (e.shiftKey) {
+            handleSaveVersion();
+          } else {
+            toast.success('文档已自动保存');
+          }
+        } else if (e.key === 'h') {
+          e.preventDefault();
+          setShowShortcuts(prev => !prev);
+        } else if (e.key === 'k') {
+          e.preventDefault();
+          setShowAIChat(prev => !prev);
+        } else if (e.key === '/') {
+          e.preventDefault();
+          setShowShortcuts(true);
         }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleUndo, handleRedo]);
+  }, [handleUndo, handleRedo, handleSaveVersion]);
 
   // 格式化时间
   const formatTime = (timestamp: number) => {
@@ -616,107 +892,324 @@ ${content}
         <div className="w-64 border-r bg-card flex flex-col print:hidden">
           {/* 侧边栏头部 */}
           <div className="p-3 border-b flex items-center justify-between">
-            <span className="font-semibold text-sm">文档</span>
-            <div className="flex items-center gap-1">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7"
-                onClick={() => setShowTemplates(true)}
-                title="从模板新建"
-              >
-                <Layout className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7"
-                onClick={() => handleCreateDocument()}
-                title="新建文档"
-              >
-                <FilePlus className="h-4 w-4" />
-              </Button>
-            </div>
+            <Tabs value={sidebarTab} onValueChange={(v) => setSidebarTab(v as 'documents' | 'folders')} className="w-full">
+              <TabsList className="w-full">
+                <TabsTrigger value="documents" className="flex-1 text-xs">
+                  <FileText className="h-3 w-3 mr-1" />
+                  文档
+                </TabsTrigger>
+                <TabsTrigger value="folders" className="flex-1 text-xs">
+                  <FolderTree className="h-3 w-3 mr-1" />
+                  文件夹
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
           </div>
           
           {/* 文档列表 */}
-          <ScrollArea className="flex-1">
-            <div className="p-2 space-y-1">
-              {documents.map((doc) => (
-                <div
-                  key={doc.id}
-                  className={`group flex items-start gap-2 p-2 rounded-md cursor-pointer transition-colors ${
-                    currentDoc?.id === doc.id
-                      ? 'bg-accent text-accent-foreground'
-                      : 'hover:bg-accent/50'
-                  }`}
-                  onClick={() => handleSwitchDocument(doc.id)}
+          {sidebarTab === 'documents' && (
+            <>
+              <div className="p-2 border-b flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="flex-1 justify-start"
+                  onClick={() => setShowTemplates(true)}
                 >
-                  <FileText className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1">
-                      <span className="text-sm font-medium truncate">{doc.title}</span>
-                      {doc.isFavorite && (
-                        <Star className="h-3 w-3 fill-yellow-400 text-yellow-400 shrink-0" />
-                      )}
+                  <Layout className="h-4 w-4 mr-2" />
+                  从模板新建
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={() => handleCreateDocument()}
+                  title="新建文档"
+                >
+                  <FilePlus className="h-4 w-4" />
+                </Button>
+              </div>
+              
+              <ScrollArea className="flex-1">
+                <div className="p-2 space-y-1">
+                  {/* 收藏的文档 */}
+                  {documentManager.getFavoriteDocuments().length > 0 && (
+                    <div className="mb-3">
+                      <div className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-muted-foreground">
+                        <Star className="h-3 w-3" />
+                        收藏
+                      </div>
+                      {documentManager.getFavoriteDocuments().map((doc) => (
+                        <div
+                          key={doc.id}
+                          className={`group flex items-start gap-2 p-2 rounded-md cursor-pointer transition-colors ${
+                            currentDoc?.id === doc.id
+                              ? 'bg-accent text-accent-foreground'
+                              : 'hover:bg-accent/50'
+                          }`}
+                          onClick={() => handleSwitchDocument(doc.id)}
+                        >
+                          <FileText className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1">
+                              <span className="text-sm font-medium truncate">{doc.title}</span>
+                              <Star className="h-3 w-3 fill-yellow-400 text-yellow-400 shrink-0" />
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              {formatTime(doc.updatedAt)} · {doc.wordCount} 词
+                            </div>
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <span>{formatTime(doc.updatedAt)}</span>
-                      <span>·</span>
-                      <span>{doc.wordCount} 词</span>
+                  )}
+                  
+                  {/* 所有文档 */}
+                  {documents.map((doc) => (
+                    <div
+                      key={doc.id}
+                      className={`group flex items-start gap-2 p-2 rounded-md cursor-pointer transition-colors ${
+                        currentDoc?.id === doc.id
+                          ? 'bg-accent text-accent-foreground'
+                          : 'hover:bg-accent/50'
+                      }`}
+                      onClick={() => handleSwitchDocument(doc.id)}
+                    >
+                      <FileText className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1">
+                          <span className="text-sm font-medium truncate">{doc.title}</span>
+                          {doc.isFavorite && (
+                            <Star className="h-3 w-3 fill-yellow-400 text-yellow-400 shrink-0" />
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <span>{formatTime(doc.updatedAt)}</span>
+                          <span>·</span>
+                          <span>{doc.wordCount} 词</span>
+                        </div>
+                      </div>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 opacity-0 group-hover:opacity-100 shrink-0"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <MoreHorizontal className="h-3 w-3" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-48">
+                          <DropdownMenuItem onClick={() => handleToggleFavorite(doc.id)}>
+                            {doc.isFavorite ? (
+                              <>
+                                <StarOff className="h-4 w-4 mr-2" /> 取消收藏
+                              </>
+                            ) : (
+                              <>
+                                <Star className="h-4 w-4 mr-2" /> 收藏
+                              </>
+                            )}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleDuplicateDocument(doc.id)}>
+                            <Copy className="h-4 w-4 mr-2" /> 复制
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuSub>
+                            <DropdownMenuSubTrigger>
+                              <Folder className="h-4 w-4 mr-2" /> 移动到文件夹
+                            </DropdownMenuSubTrigger>
+                            <DropdownMenuSubContent>
+                              <DropdownMenuItem onClick={() => handleMoveDocument(doc.id, null)}>
+                                <FileText className="h-4 w-4 mr-2" /> 根目录
+                              </DropdownMenuItem>
+                              {folders.map((folder) => (
+                                <DropdownMenuItem 
+                                  key={folder.id}
+                                  onClick={() => handleMoveDocument(doc.id, folder.id)}
+                                >
+                                  <FolderOpen className="h-4 w-4 mr-2" /> {folder.name}
+                                </DropdownMenuItem>
+                              ))}
+                            </DropdownMenuSubContent>
+                          </DropdownMenuSub>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            className="text-destructive"
+                            onClick={() => {
+                              setDocToDelete(doc.id);
+                              setShowDeleteDialog(true);
+                            }}
+                          >
+                            <Trash2 className="h-4 w-4 mr-2" /> 删除
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
-                  </div>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6 opacity-0 group-hover:opacity-100 shrink-0"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <MoreHorizontal className="h-3 w-3" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-40">
-                      <DropdownMenuItem onClick={() => handleToggleFavorite(doc.id)}>
-                        {doc.isFavorite ? (
-                          <>
-                            <StarOff className="h-4 w-4 mr-2" /> 取消收藏
-                          </>
-                        ) : (
-                          <>
-                            <Star className="h-4 w-4 mr-2" /> 收藏
-                          </>
-                        )}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => handleDuplicateDocument(doc.id)}>
-                        <Copy className="h-4 w-4 mr-2" /> 复制
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        className="text-destructive"
-                        onClick={() => {
-                          setDocToDelete(doc.id);
-                          setShowDeleteDialog(true);
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4 mr-2" /> 删除
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </ScrollArea>
+              </ScrollArea>
+            </>
+          )}
           
-          {/* 侧边栏底部统计 */}
-          <div className="p-3 border-t text-xs text-muted-foreground">
-            <div className="flex items-center justify-between">
+          {/* 文件夹视图 */}
+          {sidebarTab === 'folders' && (
+            <>
+              <div className="p-2 border-b">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="w-full justify-start"
+                  onClick={() => setShowNewFolderDialog(true)}
+                >
+                  <FolderPlus className="h-4 w-4 mr-2" />
+                  新建文件夹
+                </Button>
+              </div>
+              
+              <ScrollArea className="flex-1">
+                <div className="p-2 space-y-1">
+                  {/* 根目录 */}
+                  <div
+                    className={`flex items-center gap-2 p-2 rounded-md cursor-pointer transition-colors ${
+                      currentFolderId === null
+                        ? 'bg-accent text-accent-foreground'
+                        : 'hover:bg-accent/50'
+                    }`}
+                    onClick={() => {
+                      setCurrentFolderId(null);
+                      // 显示根目录下的文档
+                    }}
+                  >
+                    <FileText className="h-4 w-4" />
+                    <span className="text-sm">所有文档</span>
+                    <Badge variant="secondary" className="ml-auto text-xs">
+                      {documents.length}
+                    </Badge>
+                  </div>
+                  
+                  {/* 文件夹列表 */}
+                  {folders.map((folder) => {
+                    const docsInFolder = getDocumentsInFolder(folder.id);
+                    return (
+                      <div key={folder.id} className="space-y-1">
+                        <div
+                          className={`flex items-center gap-2 p-2 rounded-md cursor-pointer transition-colors ${
+                            currentFolderId === folder.id
+                              ? 'bg-accent text-accent-foreground'
+                              : 'hover:bg-accent/50'
+                          }`}
+                          onClick={() => {
+                            setCurrentFolderId(folder.id);
+                            toggleFolderExpand(folder.id);
+                          }}
+                        >
+                          <FolderOpen className="h-4 w-4" style={{ color: folder.color }} />
+                          <span className="text-sm flex-1 truncate">{folder.name}</span>
+                          <Badge variant="secondary" className="text-xs">
+                            {docsInFolder.length}
+                          </Badge>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <MoreHorizontal className="h-3 w-3" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={() => handleCreateDocument(undefined, undefined, folder.id)}>
+                                <FilePlus className="h-4 w-4 mr-2" /> 新建文档
+                              </DropdownMenuItem>
+                              <DropdownMenuItem>
+                                <FolderCog className="h-4 w-4 mr-2" /> 重命名
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                className="text-destructive"
+                                onClick={() => handleDeleteFolder(folder.id)}
+                              >
+                                <Trash2 className="h-4 w-4 mr-2" /> 删除
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                        
+                        {/* 展开显示文件夹内的文档 */}
+                        {expandedFolders.has(folder.id) && docsInFolder.length > 0 && (
+                          <div className="ml-4 space-y-1">
+                            {docsInFolder.map((doc) => (
+                              <div
+                                key={doc.id}
+                                className={`flex items-center gap-2 p-2 rounded-md cursor-pointer transition-colors ${
+                                  currentDoc?.id === doc.id
+                                    ? 'bg-accent text-accent-foreground'
+                                    : 'hover:bg-accent/50'
+                                }`}
+                                onClick={() => handleSwitchDocument(doc.id)}
+                              >
+                                <FileText className="h-3 w-3 text-muted-foreground" />
+                                <span className="text-xs truncate">{doc.title}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </ScrollArea>
+            </>
+          )}
+          
+          {/* 侧边栏底部 */}
+          <div className="p-3 border-t space-y-2">
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
               <span>{documents.length} 个文档</span>
               <span>
                 {documents.reduce((sum, doc) => sum + doc.wordCount, 0).toLocaleString()} 词
               </span>
             </div>
+            
+            {/* 版本历史按钮 */}
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full justify-start"
+              onClick={() => setShowVersionHistory(true)}
+            >
+              <GitBranch className="h-4 w-4 mr-2" />
+              版本历史
+              {versions.length > 0 && (
+                <Badge variant="secondary" className="ml-auto">{versions.length}</Badge>
+              )}
+            </Button>
+            
+            {/* AI 对话按钮 */}
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full justify-start"
+              onClick={() => setShowAIChat(true)}
+            >
+              <MessageSquare className="h-4 w-4 mr-2" />
+              AI 对话
+            </Button>
+            
+            {/* 快捷键按钮 */}
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full justify-start"
+              onClick={() => setShowShortcuts(true)}
+            >
+              <Keyboard className="h-4 w-4 mr-2" />
+              快捷键
+            </Button>
           </div>
         </div>
       )}
@@ -1199,6 +1692,229 @@ ${content}
             </Button>
             <Button variant="destructive" onClick={handleDeleteDocument}>
               删除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 版本历史对话框 */}
+      <Dialog open={showVersionHistory} onOpenChange={setShowVersionHistory}>
+        <DialogContent className="max-w-2xl max-h-[80vh]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <GitBranch className="h-5 w-5" />
+              版本历史
+            </DialogTitle>
+            <DialogDescription>
+              查看和恢复文档的历史版本
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-2 max-h-[400px] overflow-y-auto">
+            {versions.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <History className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                <p>暂无版本历史</p>
+                <p className="text-sm mt-1">按 Ctrl+Shift+S 手动保存版本</p>
+              </div>
+            ) : (
+              versions.map((version, index) => (
+                <div
+                  key={version.id}
+                  className="flex items-center justify-between p-3 border rounded-lg hover:bg-accent/50"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+                      <span className="text-xs font-medium">{versions.length - index}</span>
+                    </div>
+                    <div>
+                      <div className="text-sm font-medium">
+                        {version.description || '自动保存'}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {new Date(version.savedAt).toLocaleString('zh-CN')} · {version.wordCount} 词
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleRestoreVersion(version.id)}
+                    >
+                      <Restore className="h-4 w-4 mr-1" />
+                      恢复
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-destructive"
+                      onClick={() => handleDeleteVersion(version.id)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+          
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setShowVersionHistory(false)}>
+              关闭
+            </Button>
+            <Button onClick={handleSaveVersion}>
+              <Save className="h-4 w-4 mr-2" />
+              保存当前版本
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* AI 对话对话框 */}
+      <Dialog open={showAIChat} onOpenChange={setShowAIChat}>
+        <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <MessageSquare className="h-5 w-5 text-primary" />
+              AI 对话模式
+            </DialogTitle>
+            <DialogDescription>
+              与 AI 进行对话，获取写作建议和帮助
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div 
+            ref={chatContainerRef}
+            className="flex-1 min-h-[300px] max-h-[400px] overflow-y-auto space-y-3 p-4 border rounded-lg bg-muted/30"
+          >
+            {chatMessages.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <MessageSquare className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                <p>开始与 AI 对话</p>
+                <p className="text-sm mt-1">询问关于文档的问题或请求帮助</p>
+              </div>
+            ) : (
+              chatMessages.map((message, index) => (
+                <div
+                  key={index}
+                  className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                >
+                  <div
+                    className={`max-w-[80%] rounded-lg p-3 ${
+                      message.role === 'user'
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-card border'
+                    }`}
+                  >
+                    <div className="text-sm whitespace-pre-wrap">{message.content}</div>
+                    {message.role === 'assistant' && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="mt-2 h-7"
+                        onClick={() => applyChatResult(message.content)}
+                      >
+                        <Plus className="h-3 w-3 mr-1" />
+                        添加到文档
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+            {chatLoading && (
+              <div className="flex justify-start">
+                <div className="bg-card border rounded-lg p-3">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                </div>
+              </div>
+            )}
+          </div>
+          
+          <div className="flex gap-2 mt-2">
+            <Input
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              placeholder="输入消息..."
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSendChatMessage();
+                }
+              }}
+              className="flex-1"
+            />
+            <Button onClick={handleSendChatMessage} disabled={chatLoading || !chatInput.trim()}>
+              <Send className="h-4 w-4" />
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* 新建文件夹对话框 */}
+      <Dialog open={showNewFolderDialog} onOpenChange={setShowNewFolderDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FolderPlus className="h-5 w-5" />
+              新建文件夹
+            </DialogTitle>
+            <DialogDescription>
+              创建新的文件夹来组织你的文档
+            </DialogDescription>
+          </DialogHeader>
+          
+          <Input
+            value={newFolderName}
+            onChange={(e) => setNewFolderName(e.target.value)}
+            placeholder="文件夹名称"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleCreateFolder();
+            }}
+          />
+          
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setShowNewFolderDialog(false)}>
+              取消
+            </Button>
+            <Button onClick={handleCreateFolder}>
+              创建
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 快捷键面板 */}
+      <Dialog open={showShortcuts} onOpenChange={setShowShortcuts}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Keyboard className="h-5 w-5" />
+              快捷键
+            </DialogTitle>
+            <DialogDescription>
+              使用快捷键提高编辑效率
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-2">
+            {SHORTCUTS.map((shortcut, index) => (
+              <div
+                key={index}
+                className="flex items-center justify-between p-2 rounded-lg bg-muted/50"
+              >
+                <span className="text-sm">{shortcut.description}</span>
+                <kbd className="px-2 py-1 text-xs font-mono bg-background rounded border">
+                  {shortcut.key}
+                </kbd>
+              </div>
+            ))}
+          </div>
+          
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setShowShortcuts(false)}>
+              关闭
             </Button>
           </DialogFooter>
         </DialogContent>

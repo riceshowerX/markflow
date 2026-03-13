@@ -16,19 +16,21 @@ interface AIRequestBody {
   content: string;
   selection?: string;
   config?: AIRequestConfig;
+  chatHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
+  userMessage?: string;
 }
 
 export async function POST(request: NextRequest) {
   try {
     const body: AIRequestBody = await request.json();
-    const { action, content, selection, config: customConfig } = body;
+    const { action, content, selection, config: customConfig, chatHistory, userMessage } = body;
 
     // 测试连接
     if (action === 'test') {
       return handleTestConnection(customConfig);
     }
     
-    if (!content && !selection) {
+    if (!content && !selection && action !== 'chat') {
       return NextResponse.json(
         { error: '请提供内容' },
         { status: 400 }
@@ -37,11 +39,11 @@ export async function POST(request: NextRequest) {
 
     // 如果有自定义配置，使用自定义配置调用
     if (customConfig?.apiKey) {
-      return handleCustomAIRequest(action, content, selection, customConfig);
+      return handleCustomAIRequest(action, content, selection, customConfig, chatHistory, userMessage);
     }
 
     // 否则使用默认的 Coze SDK
-    return handleDefaultAIRequest(request, action, content, selection);
+    return handleDefaultAIRequest(request, action, content, selection, chatHistory, userMessage);
   } catch (error) {
     console.error('AI API error:', error);
     return NextResponse.json(
@@ -96,7 +98,9 @@ async function handleCustomAIRequest(
   action: string,
   content: string,
   selection?: string,
-  config?: AIRequestConfig
+  config?: AIRequestConfig,
+  chatHistory?: Array<{ role: 'user' | 'assistant'; content: string }>,
+  userMessage?: string
 ) {
   if (!config) {
     return NextResponse.json(
@@ -105,7 +109,14 @@ async function handleCustomAIRequest(
     );
   }
 
-  const { systemPrompt, userPrompt } = getPrompts(action, content, selection);
+  const { systemPrompt, userPrompt, messages: additionalMessages } = getPrompts(action, content, selection, chatHistory, userMessage);
+
+  // 构建消息列表
+  const messages = [
+    { role: 'system', content: systemPrompt },
+    ...additionalMessages,
+    { role: 'user', content: userPrompt },
+  ];
 
   // 使用 OpenAI 兼容 API
   const encoder = new TextEncoder();
@@ -120,10 +131,7 @@ async function handleCustomAIRequest(
           },
           body: JSON.stringify({
             model: config.model,
-            messages: [
-              { role: 'system', content: systemPrompt },
-              { role: 'user', content: userPrompt },
-            ],
+            messages,
             temperature: 0.7,
             max_tokens: 2048,
             stream: true,
@@ -202,9 +210,11 @@ async function handleDefaultAIRequest(
   request: NextRequest,
   action: string,
   content: string,
-  selection?: string
+  selection?: string,
+  chatHistory?: Array<{ role: 'user' | 'assistant'; content: string }>,
+  userMessage?: string
 ) {
-  const { systemPrompt, userPrompt } = getPrompts(action, content, selection);
+  const { systemPrompt, userPrompt, messages: additionalMessages } = getPrompts(action, content, selection, chatHistory, userMessage);
 
   const customHeaders = HeaderUtils.extractForwardHeaders(request.headers);
   const config = new Config();
@@ -212,6 +222,7 @@ async function handleDefaultAIRequest(
 
   const messages = [
     { role: 'system' as const, content: systemPrompt },
+    ...additionalMessages,
     { role: 'user' as const, content: userPrompt },
   ];
 
@@ -251,9 +262,16 @@ async function handleDefaultAIRequest(
 }
 
 // 获取提示词
-function getPrompts(action: string, content: string, selection?: string) {
+function getPrompts(
+  action: string,
+  content: string,
+  selection?: string,
+  chatHistory?: Array<{ role: 'user' | 'assistant'; content: string }>,
+  userMessage?: string
+) {
   let systemPrompt = '';
   let userPrompt = '';
+  let messages: Array<{ role: 'user' | 'assistant'; content: string }> = [];
 
   // 对于需要选中文本的操作，如果没有选中则使用全文
   const textToProcess = selection || content;
@@ -309,10 +327,35 @@ function getPrompts(action: string, content: string, selection?: string) {
       userPrompt = `请改写以下内容：\n\n${textToProcess}`;
       break;
 
+    case 'chat':
+      systemPrompt = `你是一个专业的写作助手。你会根据用户的问题提供帮助，包括：
+- 写作建议和技巧
+- 文档内容分析
+- 文本修改建议
+- Markdown 格式帮助
+- 其他与写作相关的问题
+
+当前文档内容：
+\`\`\`
+${content}
+\`\`\`
+
+请用中文回答用户的问题。如果用户的问题是关于当前文档的，请结合文档内容给出回答。`;
+      
+      // 构建对话历史
+      if (chatHistory && chatHistory.length > 0) {
+        messages = chatHistory.map(msg => ({
+          role: msg.role,
+          content: msg.content,
+        }));
+      }
+      userPrompt = userMessage || '你好，请帮我看看这篇文档。';
+      break;
+
     default:
       systemPrompt = `你是一个专业的写作助手。请根据用户的请求提供帮助。`;
       userPrompt = content || selection || '';
   }
 
-  return { systemPrompt, userPrompt };
+  return { systemPrompt, userPrompt, messages };
 }

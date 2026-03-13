@@ -1,7 +1,19 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Inspector } from 'react-dev-inspector';
 import './globals.css';
 import { ThemeProvider } from '@/components/theme-provider';
+import { PWAInstaller } from '@/components/pwa-installer';
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#ffffff' },
+    { media: '(prefers-color-scheme: dark)', color: '#0a0a0a' },
+  ],
+};
 
 export const metadata: Metadata = {
   title: {
@@ -24,6 +36,15 @@ export const metadata: Metadata = {
   ],
   authors: [{ name: 'MarkFlow Team' }],
   generator: 'Next.js',
+  manifest: '/manifest.json',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'MarkFlow',
+  },
+  formatDetection: {
+    telephone: false,
+  },
   openGraph: {
     title: 'MarkFlow - Modern Markdown Editor with AI',
     description: 'A modern Markdown editor with AI-powered writing assistance, multi-document management, and real-time preview.',
@@ -55,6 +76,7 @@ export default function RootLayout({
         >
           {isDev && <Inspector />}
           {children}
+          <PWAInstaller />
         </ThemeProvider>
       </body>
     </html>
