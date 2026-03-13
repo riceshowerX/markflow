@@ -107,7 +107,7 @@ Get started quickly with 10 built-in templates:
 
 1. Clone the repository
 ```bash
-git clone https://github.com/yourusername/markflow.git
+git clone https://github.com/riceshowerx/markflow.git
 cd markflow
 ```
 
