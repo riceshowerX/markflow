@@ -30,6 +30,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import {
+  AlertCircle,
   Bold,
   Italic,
   Strikethrough,
@@ -168,6 +169,10 @@ export default function MarkdownEditor() {
   
   // 快捷键面板
   const [showShortcuts, setShowShortcuts] = useState(false);
+  
+  // AI 配置提示
+  const [showAIConfigAlert, setShowAIConfigAlert] = useState(false);
+  const [aiConfigAlertAction, setAIConfigAlertAction] = useState<string>('');
   
   // 编辑器状态
   const [mode, setMode] = useState<'edit' | 'preview' | 'live'>('live');
@@ -471,9 +476,29 @@ export default function MarkdownEditor() {
 
   // ==================== AI 对话模式 ====================
 
+  // 检查 AI 配置
+  const checkAIConfig = useCallback((action: string): boolean => {
+    const config = aiConfigManager.getConfig();
+    if (!config.apiKey) {
+      setAIConfigAlertAction(action);
+      setShowAIConfigAlert(true);
+      return false;
+    }
+    return true;
+  }, []);
+
+  // 打开 AI 对话时检查配置
+  const handleOpenAIChat = useCallback(() => {
+    if (!checkAIConfig('chat')) return;
+    setShowAIChat(true);
+  }, [checkAIConfig]);
+
   // 发送对话消息
   const handleSendChatMessage = useCallback(async () => {
     if (!chatInput.trim() || chatLoading) return;
+    
+    // 检查 AI 配置
+    if (!checkAIConfig('chat')) return;
     
     const userMessage = chatInput.trim();
     setChatInput('');
@@ -565,6 +590,9 @@ export default function MarkdownEditor() {
 
   // AI 写作助手
   const handleAIAssist = useCallback(async (action: string, selection?: string) => {
+    // 检查 AI 配置
+    if (!checkAIConfig(action)) return;
+    
     setAiLoading(true);
     setAiResult('');
     setAiAction(action);
@@ -859,7 +887,12 @@ ${content}
           setShowShortcuts(prev => !prev);
         } else if (e.key === 'k') {
           e.preventDefault();
-          setShowAIChat(prev => !prev);
+          // 如果当前是关闭状态，需要检查配置后再打开
+          if (!showAIChat) {
+            handleOpenAIChat();
+          } else {
+            setShowAIChat(false);
+          }
         } else if (e.key === '/') {
           e.preventDefault();
           setShowShortcuts(true);
@@ -869,7 +902,7 @@ ${content}
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleUndo, handleRedo, handleSaveVersion]);
+  }, [handleUndo, handleRedo, handleSaveVersion, showAIChat, handleOpenAIChat]);
 
   // 格式化时间
   const formatTime = (timestamp: number) => {
@@ -1194,7 +1227,7 @@ ${content}
               variant="outline"
               size="sm"
               className="w-full justify-start"
-              onClick={() => setShowAIChat(true)}
+              onClick={handleOpenAIChat}
             >
               <MessageSquare className="h-4 w-4 mr-2" />
               AI 对话
@@ -1915,6 +1948,64 @@ ${content}
           <DialogFooter>
             <Button variant="ghost" onClick={() => setShowShortcuts(false)}>
               关闭
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* AI 配置提示对话框 */}
+      <Dialog open={showAIConfigAlert} onOpenChange={setShowAIConfigAlert}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-500">
+              <AlertCircle className="h-5 w-5" />
+              需要配置 AI API
+            </DialogTitle>
+            <DialogDescription>
+              使用 AI 功能需要先配置 API Key
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            <div className="flex items-start gap-3 p-3 rounded-lg bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900">
+              <AlertCircle className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
+              <div className="text-sm text-amber-800 dark:text-amber-200">
+                <p className="font-medium mb-1">尚未配置 AI API Key</p>
+                <p className="text-xs opacity-80">
+                  请前往设置页面配置您的 AI 提供商和 API Key，然后即可使用所有 AI 写作助手功能。
+                </p>
+              </div>
+            </div>
+            
+            <div className="text-sm text-muted-foreground space-y-2">
+              <p className="font-medium">支持的 AI 提供商：</p>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="flex items-center gap-2 p-2 rounded border">
+                  <span>🤖</span> 豆包
+                </div>
+                <div className="flex items-center gap-2 p-2 rounded border">
+                  <span>🧠</span> DeepSeek
+                </div>
+                <div className="flex items-center gap-2 p-2 rounded border">
+                  <span>💚</span> OpenAI
+                </div>
+                <div className="flex items-center gap-2 p-2 rounded border">
+                  <span>🌙</span> Kimi
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setShowAIConfigAlert(false)}>
+              稍后再说
+            </Button>
+            <Button onClick={() => {
+              setShowAIConfigAlert(false);
+              router.push('/settings');
+            }}>
+              <Settings className="h-4 w-4 mr-2" />
+              前往设置
             </Button>
           </DialogFooter>
         </DialogContent>
