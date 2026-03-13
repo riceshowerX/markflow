@@ -5,22 +5,36 @@ import { ThemeProvider } from '@/components/theme-provider';
 
 export const metadata: Metadata = {
   title: {
-    default: 'Markdown 编辑器 | 在线文档编辑工具',
-    template: '%s | Markdown 编辑器',
+    default: 'MarkFlow - Modern Markdown Editor with AI',
+    template: '%s | MarkFlow',
   },
   description:
-    '功能丰富的在线 Markdown 编辑器，支持实时预览、语法高亮、多种导出格式、历史记录等功能',
+    'MarkFlow is a modern Markdown editor with AI-powered writing assistance, multi-document management, real-time preview, and extensive export options.',
   keywords: [
-    'Markdown 编辑器',
-    '在线编辑器',
+    'MarkFlow',
+    'Markdown Editor',
+    'AI Writing',
+    'Online Editor',
     'Markdown',
-    '文档编辑',
-    '实时预览',
-    '语法高亮',
-    '导出',
+    'Document Editor',
+    'Real-time Preview',
+    'Syntax Highlighting',
+    'Export',
+    'Next.js',
   ],
-  authors: [{ name: 'Markdown Editor Team' }],
+  authors: [{ name: 'MarkFlow Team' }],
   generator: 'Next.js',
+  openGraph: {
+    title: 'MarkFlow - Modern Markdown Editor with AI',
+    description: 'A modern Markdown editor with AI-powered writing assistance, multi-document management, and real-time preview.',
+    type: 'website',
+    locale: 'en_US',
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'MarkFlow - Modern Markdown Editor with AI',
+    description: 'A modern Markdown editor with AI-powered writing assistance, multi-document management, and real-time preview.',
+  },
 };
 
 export default function RootLayout({

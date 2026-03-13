@@ -2,8 +2,8 @@ import type { Metadata } from 'next';
 import MarkdownEditor from '@/components/markdown-editor';
 
 export const metadata: Metadata = {
-  title: 'Markdown 编辑器',
-  description: '功能丰富的在线 Markdown 编辑器',
+  title: 'Editor',
+  description: 'Write and edit Markdown documents with AI assistance, real-time preview, and powerful export options.',
 };
 
 export default function Home() {
